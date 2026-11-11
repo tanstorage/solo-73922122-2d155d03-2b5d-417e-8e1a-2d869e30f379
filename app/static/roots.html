@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>TUF 根信任轮换 · 受信 Root 管理</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --panel2: #24334d; --line: #334155;
+    --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8;
+    --ok: #22c55e; --bad: #ef4444; --warn: #f59e0b; --link: #a78bfa;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px; line-height: 1.55;
+  }
+  header {
+    padding: 18px 24px 14px; border-bottom: 1px solid var(--line);
+    background: linear-gradient(180deg, #16233d, #0f172a);
+  }
+  header h1 { margin: 0 0 4px; font-size: 20px; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+  .wrap { display: grid; grid-template-columns: minmax(420px, 1fr) minmax(460px, 1.1fr); gap: 16px; padding: 16px 24px 32px; }
+  @media (max-width: 1120px) { .wrap { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+  .panel h2 { margin: 0; padding: 12px 16px; font-size: 15px; border-bottom: 1px solid var(--line); background: var(--panel2); }
+  .panel .body { padding: 14px 16px; }
+  button {
+    background: var(--accent); color: #082f49; border: 0; border-radius: 8px;
+    padding: 8px 14px; font-weight: 600; cursor: pointer; font-size: 13px;
+  }
+  button.secondary { background: var(--panel2); color: var(--text); border: 1px solid var(--line); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .kv { display: grid; grid-template-columns: 130px 1fr; gap: 4px 10px; font-size: 12.5px; margin-top: 6px; }
+  .kv .k { color: var(--muted); }
+  .mono { font-family: var(--mono); word-break: break-all; }
+  .badge { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .badge.ok { background: var(--ok); color: #052e16; }
+  .badge.bad { background: var(--bad); color: #450a0a; }
+  .badge.warn { background: var(--warn); color: #451a03; }
+  .verdict { border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; border: 1px solid var(--line); }
+  .verdict.ok { background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.5); }
+  .verdict.bad { background: rgba(239,68,68,.12); border-color: rgba(239,68,68,.55); }
+  .verdict h3 { margin: 0 0 6px; font-size: 16px; }
+  .filelist { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  .fileitem { display: flex; justify-content: space-between; gap: 8px; align-items: center;
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; background: #172236; font-size: 12.5px; }
+  .fileitem .ver { font-family: var(--mono); color: #7dd3fc; font-weight: 700; }
+  .fileitem.bad { border-color: rgba(239,68,68,.6); }
+  .fileitem .tag { font-size: 11px; padding: 1px 7px; border-radius: 6px; background: var(--panel2); border: 1px solid var(--line); color: var(--muted); }
+  .step { border: 1px solid var(--line); border-left-width: 4px; border-radius: 8px; padding: 9px 12px; background: #172236; margin-top: 8px; }
+  .step.pass { border-left-color: var(--ok); }
+  .step.fail { border-left-color: var(--bad); }
+  .step .t { font-weight: 600; font-size: 13px; }
+  .step .d { color: var(--muted); font-size: 12px; margin-top: 3px; }
+  table.audit { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 8px; }
+  table.audit th, table.audit td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; vertical-align: top; }
+  table.audit th { background: var(--panel2); color: var(--muted); }
+  .rules { font-size: 12.5px; color: var(--muted); }
+  .rules li { margin: 4px 0; }
+  .dropzone { border: 1.5px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; cursor: pointer; color: var(--muted); }
+  .dropzone.drag { border-color: var(--accent); background: rgba(56,189,248,.08); color: var(--text); }
+  .demo-btn { font-size: 12px; padding: 6px 10px; }
+  a.dl { color: var(--accent); text-decoration: none; font-size: 12px; }
+  a.dl:hover { text-decoration: underline; }
+  .scroll { max-height: 620px; overflow-y: auto; padding-right: 4px; }
+  .sigline { font-family: var(--mono); font-size: 11px; margin-top: 2px; }
+  .sig-accepted { color: #86efac; }
+  .sig-bad { color: #fca5a5; }
+  .sig-ignored { color: var(--muted); }
+  code { font-family: var(--mono); background: var(--panel2); padding: 1px 5px; border-radius: 5px; }
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+    <div>
+      <h1>🔐 TUF 根信任轮换 · 受信 Root 管理台</h1>
+      <p>为长期断网的更新客户端补齐签名密钥轮换链：浏览器上传 1～8 份按版本排列的 root 元数据（仅 Ed25519），
+      按 <b>TUF 1.0.37</b> 规则做整链验签；整链通过才以 SQLite 原子替换受信 root，失败保留原根并指出版本与原因。</p>
+    </div>
+    <a href="/" style="white-space:nowrap;text-decoration:none;background:var(--panel2);color:var(--text);border:1px solid var(--line);font-weight:600;padding:8px 14px;border-radius:8px;font-size:13px">← 返回诊断台</a>
+  </div>
+</header>
+
+<div class="wrap">
+  <!-- ================= 左：当前受信根 + 上传 ================= -->
+  <div>
+    <section class="panel">
+      <h2>① 当前受信 root（SQLite 持久化，重启保留）</h2>
+      <div class="body">
+        <div id="trustedInfo"><p class="hint">加载中…</p></div>
+        <div class="row" style="margin-top:12px">
+          <button id="downloadBtn" type="button">⬇ 下载当前受信 root（供客户端安装）</button>
+          <button class="secondary" id="refreshBtn" type="button">刷新</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>② 上传轮换链（1～8 份 root，按版本自动排序）</h2>
+      <div class="body">
+        <div class="dropzone" id="dropzone">
+          点击选择或拖拽 root 元数据 JSON 到此处（可多选；版本须从受信版本 +1 逐次加 1）
+          <input id="fileInput" type="file" accept=".json,application/json" multiple style="display:none" />
+        </div>
+        <div class="filelist" id="fileList"></div>
+        <div class="row" style="margin-top:12px">
+          <button id="submitBtn" type="button" disabled>▶ 提交整链验证</button>
+          <button class="secondary" id="clearBtn" type="button">清空</button>
+          <span class="hint" id="submitHint"></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>③ 轮换示例（一键载入后直接提交，可先下载查看内容）</h2>
+      <div class="body">
+        <p class="hint" style="margin-top:0">示例由固定种子生成，含一条合法 3 份链（v2→v3→v4）与两类失败链。文件位于 <code>/static/demo/</code>。</p>
+        <div class="row">
+          <button class="secondary demo-btn" data-demo="valid" type="button">载入合法链 v2-v4</button>
+          <button class="secondary demo-btn" data-demo="bad-threshold" type="button">载入失败链：阈值不足</button>
+          <button class="secondary demo-btn" data-demo="bad-expired" type="button">载入失败链：最终根过期</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <a class="dl" href="/static/demo/README.md" target="_blank">示例说明 README ↗</a>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <!-- ================= 右：结果 + 规则 + 审计 ================= -->
+  <div>
+    <section class="panel">
+      <h2>④ 验证结果</h2>
+      <div class="body scroll" id="resultPane">
+        <p class="hint">提交后这里展示每个版本的双重阈值验签细节、过期判定；失败时明确指出失败版本与原因，受信 root 保持不变。</p>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>⑤ TUF 1.0.37 验签规则（本服务实现）</h2>
+      <div class="body">
+        <ul class="rules">
+          <li>仅支持 <b>Ed25519</b>（keytype/scheme 均为 <code>ed25519</code>）；keyid = <code>sha256(canonical JSON(key))</code>，不符即拒绝。</li>
+          <li>版本号必须 <b>逐次加 1</b>：首份为受信版本 +1，之后每份 = 上一份 +1。</li>
+          <li>每份候选 root 必须 <b>同时</b> 达到：①上一版 root 的 root 角色阈值；②自身 root 角色阈值。</li>
+          <li>同一 keyid 的多条签名只计一次，<b>重复 keyid 不得凑足阈值</b>；未知 keyid 的签名忽略。</li>
+          <li>中间版本 root <b>允许已过期</b>；最终 root 的 <code>expires</code> 必须晚于本次更新开始时间。</li>
+          <li>整链通过才替换 SQLite 中的受信 root；任一环节失败则保留原根，返回失败版本与原因。</li>
+          <li>两个工作进程并发提交时，以锁内读到的最新受信 root 为起点，后到的请求不会覆盖已提交的更新。</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:16px">
+      <h2>⑥ 审计记录（重启保留）</h2>
+      <div class="body">
+        <div class="row" style="margin-bottom:6px">
+          <button class="secondary demo-btn" id="auditBtn" type="button">刷新审计</button>
+        </div>
+        <div id="auditPane"><p class="hint">点击“刷新审计”加载。</p></div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function esc(s) {
+  return String(s ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+let selectedFiles = [];
+
+async function loadTrusted() {
+  const r = await fetch("/api/root");
+  const data = await r.json();
+  if (!data.ok) { $("trustedInfo").innerHTML = `<span class="badge bad">加载失败</span> ${esc(data.message)}`; return; }
+  const t = data.trusted_root;
+  $("trustedInfo").innerHTML = `
+    <div class="kv">
+      <span class="k">版本 version</span><span class="mono">${esc(t.version)}</span>
+      <span class="k">spec_version</span><span class="mono">${esc(t.spec_version)}</span>
+      <span class="k">过期时间</span><span class="mono">${esc(t.expires)}</span>
+      <span class="k">root 阈值</span><span class="mono">${esc(t.root_threshold)}</span>
+      <span class="k">密钥数量</span><span class="mono">${esc(t.key_count)}</span>
+      <span class="k">root keyids</span><span class="mono">${(t.root_keyids || []).map(esc).join("<br>") || "（无）"}</span>
+    </div>`;
+}
+
+$("downloadBtn").addEventListener("click", () => { window.location.href = "/api/root/download"; });
+$("refreshBtn").addEventListener("click", loadTrusted);
+
+// ---------------- 文件选择 ----------------
+const dz = $("dropzone"), fi = $("fileInput");
+dz.addEventListener("click", () => fi.click());
+dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
+dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
+dz.addEventListener("drop", (e) => {
+  e.preventDefault(); dz.classList.remove("drag");
+  mergeFiles([...e.dataTransfer.files]);
+});
+fi.addEventListener("change", () => { mergeFiles([...fi.files]); fi.value = ""; });
+
+function mergeFiles(incoming) {
+  const have = new Set(selectedFiles.map((f) => f.name + ":" + f.size));
+  for (const f of incoming) {
+    const key = f.name + ":" + f.size;
+    if (!have.has(key)) selectedFiles.push(f);
+  }
+  renderFileList();
+}
+
+function renderFileList() {
+  const el = $("fileList");
+  if (!selectedFiles.length) { el.innerHTML = ""; $("submitBtn").disabled = true; return; }
+  $("submitBtn").disabled = false;
+  el.innerHTML = selectedFiles.map((f, i) => `
+    <div class="fileitem">
+      <span>📄 ${esc(f.name)} <span class="tag">${(f.size / 1024).toFixed(1)} KiB</span></span>
+      <span class="row">
+        <button class="secondary demo-btn" data-rm="${i}" type="button">移除</button>
+      </span>
+    </div>`).join("");
+  el.querySelectorAll("[data-rm]").forEach((b) => b.addEventListener("click", () => {
+    selectedFiles.splice(Number(b.dataset.rm), 1); renderFileList();
+  }));
+}
+
+$("clearBtn").addEventListener("click", () => { selectedFiles = []; renderFileList(); $("submitHint").textContent = ""; });
+
+// ---------------- 提交 ----------------
+$("submitBtn").addEventListener("click", async () => {
+  if (!selectedFiles.length) return;
+  $("submitBtn").disabled = true;
+  $("submitHint").textContent = "验证中…";
+  $("resultPane").innerHTML = `<p class="hint">整链验证中（锁内读取最新受信 root）…</p>`;
+  const fd = new FormData();
+  for (const f of selectedFiles) fd.append("files", f);
+  let data;
+  try {
+    const r = await fetch("/api/root/update", { method: "POST", body: fd });
+    data = await r.json();
+  } catch (e) {
+    data = { ok: false, message: "请求失败: " + e };
+  }
+  $("submitBtn").disabled = false;
+  $("submitHint").textContent = "";
+  if (data.ok) {
+    $("resultPane").innerHTML = renderSuccess(data);
+    loadTrusted(); loadAudit();
+  } else {
+    $("resultPane").innerHTML = renderFailure(data);
+    loadAudit();
+  }
+});
+
+function sigRows(check) {
+  return check.signatures.map((s) => {
+    const cls = s.status === "accepted" ? "sig-accepted"
+      : s.status === "bad_signature" ? "sig-bad" : "sig-ignored";
+    const label = { accepted: "✓ 通过", bad_signature: "✗ 验签失败",
+      ignored_untrusted_keyid: "忽略(非受信keyid)", duplicate_ignored: "忽略(重复)" }[s.status] || s.status;
+    return `<div class="sigline ${cls}">${label} · ${esc(s.keyid.slice(0, 16))}… — ${esc(s.detail)}</div>`;
+  }).join("");
+}
+
+function renderSuccess(data) {
+  const reports = data.reports.map((rep) => `
+    <div class="step pass">
+      <div class="t">✅ root v${esc(rep.version)}
+        ${rep.intermediate_expired_allowed ? '<span class="badge warn">中间版本已过期(允许)</span>' : ""}
+        ${rep.expired_at_update_start && !rep.intermediate_expired_allowed ? "" : ""}
+      </div>
+      <div class="d">expires=${esc(rep.expires)}</div>
+      <div class="d">① 上一版 root 阈值：有效签名 ${rep.threshold_checks.previous_root.accepted_count} / 阈值 ${rep.threshold_checks.previous_root.threshold}</div>
+      ${sigRows(rep.threshold_checks.previous_root)}
+      <div class="d">② 自身 root 阈值：有效签名 ${rep.threshold_checks.self_root.accepted_count} / 阈值 ${rep.threshold_checks.self_root.threshold}</div>
+      ${sigRows(rep.threshold_checks.self_root)}
+    </div>`).join("");
+  return `<div class="verdict ok">
+      <h3><span class="badge ok">整链通过</span>受信 root v${esc(data.previous_version)} → v${esc(data.current_version)}</h3>
+      <div>共 ${esc(data.file_count)} 份 root 全部通过双重阈值验签，SQLite 中的受信 root 已原子替换。更新开始时间 ${esc(data.update_started_at)}。</div>
+    </div>${reports}`;
+}
+
+function renderFailure(data) {
+  return `<div class="verdict bad">
+      <h3><span class="badge bad">整链被拒绝</span>受信 root 保持不变</h3>
+      <div class="kv">
+        <span class="k">失败版本</span><span class="mono">${data.failed_version == null ? "（未定版本）" : "v" + esc(data.failed_version)}</span>
+        <span class="k">错误类型</span><span class="mono">${esc(data.error_type || "chain_error")}</span>
+        <span class="k">原因</span><span>${esc(data.message)}</span>
+      </div>
+    </div>
+    <p class="hint">请修正后重新提交；任何部分成功都不会写入，受信 root 仍是替换前的版本。</p>`;
+}
+
+// ---------------- 审计 ----------------
+async function loadAudit() {
+  const r = await fetch("/api/root/audit?limit=15");
+  const data = await r.json();
+  if (!data.ok) { $("auditPane").textContent = "加载失败"; return; }
+  if (!data.entries.length) { $("auditPane").innerHTML = '<p class="hint">暂无记录</p>'; return; }
+  $("auditPane").innerHTML = `<table class="audit">
+    <thead><tr><th>时间(UTC)</th><th>结果</th><th>版本</th><th>份数</th><th>失败版本/原因</th></tr></thead>
+    <tbody>${data.entries.map((e) => `
+      <tr>
+        <td class="mono">${esc(e.ts.replace("T", " ").slice(0, 19))}</td>
+        <td>${e.result === "success" ? '<span class="badge ok">成功</span>'
+            : e.result === "bootstrap" ? '<span class="badge warn">引导</span>'
+            : '<span class="badge bad">失败</span>'}</td>
+        <td class="mono">${e.from_version == null ? "-" : esc(e.from_version)} → ${e.to_version == null ? "-" : esc(e.to_version)}</td>
+        <td class="mono">${esc(e.file_count)}</td>
+        <td>${e.failed_version == null ? "" : '<span class="mono">v' + esc(e.failed_version) + "</span>："}${esc(e.reason || "")}</td>
+      </tr>`).join("")}
+    </tbody></table>`;
+}
+$("auditBtn").addEventListener("click", loadAudit);
+
+// ---------------- 示例一键载入 ----------------
+const DEMO_FILES = {
+  valid: ["root.v2.json", "root.v3.json", "root.v4.json"],
+  "bad-threshold": ["root.v2.json", "root.v3.json", "root.bad-threshold.v4.json"],
+  "bad-expired": ["root.v2.json", "root.v3.json", "root.bad-expired.v4.json"],
+};
+document.querySelectorAll("[data-demo]").forEach((btn) => btn.addEventListener("click", async () => {
+  const names = DEMO_FILES[btn.dataset.demo];
+  selectedFiles = [];
+  for (const name of names) {
+    const r = await fetch("/static/demo/" + name);
+    if (!r.ok) { alert("示例文件加载失败: " + name); return; }
+    const blob = await r.blob();
+    selectedFiles.push(new File([blob], name, { type: "application/json" }));
+  }
+  renderFileList();
+  $("resultPane").innerHTML = `<p class="hint">已载入示例链（${names.length} 份），点击“提交整链验证”。</p>`;
+}));
+
+loadTrusted();
+loadAudit();
+</script>
+</body>
+</html>
